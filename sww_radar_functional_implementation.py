@@ -29,7 +29,7 @@ tx_otw = rx_otw = "sc16"
 # subdevice specification: https://files.ettus.com/manual/page_configuration.html
 rx_subdev = tx_subdev = "A:A A:B"
 
-duration = 2
+duration = 5
 
 #############################################################################################
 # define the sww_tx_subpulse and sww_rx_subpulse
@@ -65,7 +65,14 @@ def set_txrx_gains(usrp, tx_gains, rx_gains):
     usrp.set_rx_gain(rx_gains[1], 1)
 
 
-def tx_worker(usrp, tx_streamer, tx_stop_event, sww_tx_start_event, sww_rx_on_event):
+def tx_worker(
+    usrp,
+    tx_streamer,
+    tx_stop_event,
+    sww_tx_start_event,
+    sww_rx_on_event,
+    sww_tx_on_event,
+):
 
     # Make a transmit buffer
     num_channels = tx_streamer.get_num_channels()
@@ -80,13 +87,12 @@ def tx_worker(usrp, tx_streamer, tx_stop_event, sww_tx_start_event, sww_rx_on_ev
 
     while not tx_stop_event.is_set():
         try:
-            if sww_tx_start_event.is_set():
+            if sww_tx_start_event.is_set() and sww_rx_on_event.is_set():
                 send_samps = 0
                 total_samps = sww_tx_subpulse.shape[1]
                 metadata.has_time_spec = False
 
                 # waiting for the rx to turn on
-                sww_rx_on_event.wait()
 
                 while send_samps < total_samps:
                     real_samps = min(max_samps_per_packet, total_samps - send_samps)
@@ -94,8 +100,12 @@ def tx_worker(usrp, tx_streamer, tx_stop_event, sww_tx_start_event, sww_rx_on_ev
                         sww_tx_subpulse[:, send_samps : (send_samps + real_samps)],
                         metadata,
                     )
-                
-                # sww_tx_start_event.clear()
+                    sww_tx_on_event.set()
+
+                    print(f"send samps = {send_samps}")
+
+                sww_tx_on_event.clear()
+                sww_tx_start_event.clear()
 
             else:
                 tx_streamer.send(transmit_buffer, metadata)
@@ -110,7 +120,14 @@ def tx_worker(usrp, tx_streamer, tx_stop_event, sww_tx_start_event, sww_rx_on_ev
     tx_streamer.send(np.zeros((num_channels, 0), dtype=np.complex64), metadata)
 
 
-def rx_worker(usrp, rx_streamer, rx_stop_event, sww_rx_start_event, sww_rx_on_event):
+def rx_worker(
+    usrp,
+    rx_streamer,
+    rx_stop_event,
+    sww_rx_start_event,
+    sww_rx_on_event,
+    sww_tx_on_event,
+):
 
     # make a receive buffer
     num_channels = rx_streamer.get_num_channels()
@@ -138,9 +155,10 @@ def rx_worker(usrp, rx_streamer, rx_stop_event, sww_rx_start_event, sww_rx_on_ev
                         metadata,
                     )
 
-                    sww_rx_on_event.set()
+                    sww_rx_on_event.set()  # set this event on after receiving the first package
 
-                    if samps:
+                    # save the rx signal
+                    if samps and sww_tx_on_event.is_set():
                         real_samps = min(samps, total_samps - recv_samps)
                         sww_rx_subpulse[
                             :, recv_samps : recv_samps + real_samps
@@ -201,22 +219,39 @@ def main():
     threads = []
 
     rx_stop_event = threading.Event()
+    tx_stop_event = threading.Event()
+
     sww_rx_start_event = threading.Event()
+    sww_tx_start_event = threading.Event()
+
     sww_rx_on_event = threading.Event()
+    sww_tx_on_event = threading.Event()
 
     rx_thread = threading.Thread(
         target=rx_worker,
-        args=(usrp, rx_streamer, rx_stop_event, sww_rx_start_event, sww_rx_on_event),
+        args=(
+            usrp,
+            rx_streamer,
+            rx_stop_event,
+            sww_rx_start_event,
+            sww_rx_on_event,
+            sww_tx_on_event,
+        ),
     )
     rx_thread.setName("rx_thread")
     threads.append(rx_thread)
     ##############################################################################
-    tx_stop_event = threading.Event()
-    sww_tx_start_event = threading.Event()
 
     tx_thread = threading.Thread(
         target=tx_worker,
-        args=(usrp, tx_streamer, tx_stop_event, sww_tx_start_event, sww_rx_on_event),
+        args=(
+            usrp,
+            tx_streamer,
+            tx_stop_event,
+            sww_tx_start_event,
+            sww_rx_on_event,
+            sww_tx_on_event,
+        ),
     )
     tx_thread.setName("tx_thread")
     threads.append(tx_thread)
@@ -232,16 +267,15 @@ def main():
     set_txrx_center_freq(usrp, center_freq)
 
     rx_thread.start()
+    time.sleep(
+        5 * INIT_DELAY
+    )  # wait for some time to make sure the tx_worker and rx_worker are working properly
     tx_thread.start()
-    
-    # wait for some time to make sure the tx_worker and rx_worker are working properly
-    time.sleep(10 * INIT_DELAY)
-
-    
-    
+    time.sleep(5 * INIT_DELAY)
 
     # start collect data
     sww_rx_start_event.set()
+    time.sleep(5 * INIT_DELAY)
     sww_tx_start_event.set()
 
     time.sleep(duration)
@@ -260,5 +294,3 @@ def main():
 if __name__ == "__main__":
 
     sys.exit(not main())
-
-    print("hello")
