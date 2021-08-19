@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 
 # define constants
 INIT_DELAY = 0.05  # 50mS initial delay before transmit
-TXRX_RATE = 10e6  # the ADC/DAC rate of the rx and tx
+TXRX_RATE = 15e6  # the ADC/DAC rate of the rx and tx
 
 ###############################################################################################
 # define device parameters
@@ -34,7 +34,7 @@ duration = 1
 #############################################################################################
 # define the sww_tx_subpulse and sww_rx_subpulse
 sww_tx_subpulse, _ = complex_sinusoid(TXRX_RATE)
-num_rx_samps = sww_tx_subpulse.shape[1] * 15
+num_rx_samps = sww_tx_subpulse.shape[1] * 25
 # num_rx_samps = length_wave_one_period*20
 sww_rx_subpulse = np.zeros((2, num_rx_samps), dtype=np.complex64)
 
@@ -71,7 +71,7 @@ def tx_worker(usrp, tx_streamer, tx_stop_event, sww_rx_on_event):
     TX_ZEROS = 0
     TX_SWW_SUBPULSE = 1
     TX_STOP = 2
-    TX_SWW_SUBPULSE_DONE = 3
+    WAIT_FOR_RX_DONE = 3
     START_STATE = TX_ZEROS
 
     # Make a transmit buffer
@@ -114,9 +114,9 @@ def tx_worker(usrp, tx_streamer, tx_stop_event, sww_rx_on_event):
                     break
 
             # state transitions
-            current_state = TX_SWW_SUBPULSE_DONE
+            current_state = WAIT_FOR_RX_DONE
         
-        elif current_state == TX_SWW_SUBPULSE_DONE:
+        elif current_state == WAIT_FOR_RX_DONE:
             # actions
             tx_streamer.send(transmit_buffer, metadata)
             metadata.has_time_spec = False
@@ -126,7 +126,7 @@ def tx_worker(usrp, tx_streamer, tx_stop_event, sww_rx_on_event):
                 current_state = TX_ZEROS
 
         elif current_state == TX_STOP:
-            print("Stop transmitting")
+            print("Stop TX")
             # send a mini EOB packet
             tx_streamer.send(np.zeros((num_channels, 0), dtype=np.complex64), metadata)
             break
@@ -200,7 +200,7 @@ def rx_worker(usrp, rx_streamer, rx_stop_event, sww_rx_start_event, sww_rx_on_ev
             current_state = RX_ZEROS
 
         elif current_state == RX_STOP:
-            print("stop rx")
+            print("Stop Rx")
             rx_streamer.issue_stream_cmd(
                 uhd.types.StreamCMD(uhd.types.StreamMode.stop_cont)
             )
@@ -286,12 +286,12 @@ def main():
 
     # start collect data
     sww_rx_start_event.set()
-    time.sleep(5 * INIT_DELAY)
+    
 
     time.sleep(duration)
 
     # turn off device
-    print("Sending signal to stop!")
+    print("Sending signal to stop TX and RX!")
     rx_stop_event.set()
     tx_stop_event.set()
     for thr in threads:
