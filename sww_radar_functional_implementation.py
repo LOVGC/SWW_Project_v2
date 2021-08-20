@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 
 # define constants
 INIT_DELAY = 0.05  # 50mS initial delay before transmit
-TXRX_RATE = 10e6  # the ADC/DAC rate of the rx and tx
+TXRX_RATE = 3.5e6  # the ADC/DAC rate of the rx and tx
 
 ###############################################################################################
 # define device parameters
@@ -39,34 +39,10 @@ sww_rx_subpulse = np.zeros((2, num_rx_samps), dtype=np.complex64)
 
 tx_gains = [75, 75]
 rx_gains = [10, 10]
-target_center_freq = 1e9
+target_center_freq = 2e9
 
 
 ##########################################################################################
-
-
-def set_txrx_center_freq(usrp, target_center_freq):
-
-    usrp.set_rx_freq(lib.types.tune_request(target_center_freq), 0)
-
-    # wait until the lo's are locked, or maybe just put some time delay here?
-    while not (usrp.get_rx_sensor("lo_locked", 0).to_bool()):
-        pass
-
-    usrp.set_tx_freq(lib.types.tune_request(target_center_freq), 0)
-
-    # wait until the lo's are locked, or maybe just put some time delay here?
-    while not (usrp.get_tx_sensor("lo_locked", 0).to_bool()):
-        pass
-
-
-def set_txrx_gains(usrp, tx_gains, rx_gains):
-    usrp.set_tx_gain(tx_gains[0], 0)
-    usrp.set_tx_gain(tx_gains[1], 1)
-
-    usrp.set_rx_gain(rx_gains[0], 0)
-    usrp.set_rx_gain(rx_gains[1], 1)
-
 
 def tx_worker(
     usrp,
@@ -119,7 +95,7 @@ def tx_worker(
         elif current_state == TX_PREP:
             # actions
             tx_streamer.send(transmit_buffer, metadata)
-            metadata.has_time_spec = False
+            
 
             usrp.set_tx_gain(tx_gains[0], 0)  # set tx gains
             usrp.set_tx_gain(tx_gains[1], 1)
@@ -134,8 +110,7 @@ def tx_worker(
         elif current_state == WAITING_TX_LO:
             # actions
             tx_streamer.send(transmit_buffer, metadata)
-            metadata.has_time_spec = False
-
+            
             # transitions
             if usrp.get_tx_sensor(
                 "lo_locked", 0
@@ -145,7 +120,7 @@ def tx_worker(
         elif current_state == SWW_TX_READY:
             # actions
             tx_streamer.send(transmit_buffer, metadata)
-            metadata.has_time_spec = False
+            
 
             sww_tx_ready_event.set()
 
@@ -156,8 +131,7 @@ def tx_worker(
         elif current_state == SWW_TX_SUBPULSE:
             send_samps = 0
             total_samps = sww_tx_subpulse.shape[1]
-            metadata.has_time_spec = False
-
+            
             while send_samps < total_samps:
                 real_samps = min(max_samps_per_packet, total_samps - send_samps)
                 send_samps += tx_streamer.send(
@@ -171,7 +145,6 @@ def tx_worker(
         elif current_state == WAIT_FOR_SWW_RX_DONE:
             # actions
             tx_streamer.send(transmit_buffer, metadata)
-            metadata.has_time_spec = False
 
             sww_tx_ready_event.clear()
 
