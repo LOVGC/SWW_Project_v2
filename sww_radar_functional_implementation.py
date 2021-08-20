@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 
 # define constants
 INIT_DELAY = 0.05  # 50mS initial delay before transmit
-TXRX_RATE = 15e6  # the ADC/DAC rate of the rx and tx
+TXRX_RATE = 10e6  # the ADC/DAC rate of the rx and tx
 
 ###############################################################################################
 # define device parameters
@@ -29,14 +29,17 @@ tx_otw = rx_otw = "sc16"
 # subdevice specification: https://files.ettus.com/manual/page_configuration.html
 rx_subdev = tx_subdev = "A:A A:B"
 
-duration = 1
+duration = 2
 
 #############################################################################################
-# define the sww_tx_subpulse and sww_rx_subpulse
+# Global data
 sww_tx_subpulse, _ = complex_sinusoid(TXRX_RATE)
 num_rx_samps = sww_tx_subpulse.shape[1] * 25
-# num_rx_samps = length_wave_one_period*20
 sww_rx_subpulse = np.zeros((2, num_rx_samps), dtype=np.complex64)
+
+tx_gains = [75, 75]
+rx_gains = [10, 10]
+target_center_freq = 1e9
 
 
 ##########################################################################################
@@ -47,14 +50,14 @@ def set_txrx_center_freq(usrp, target_center_freq):
     usrp.set_rx_freq(lib.types.tune_request(target_center_freq), 0)
 
     # wait until the lo's are locked, or maybe just put some time delay here?
-    # while not (usrp.get_rx_sensor("lo_locked", 0).to_bool()):
-    #     pass
+    while not (usrp.get_rx_sensor("lo_locked", 0).to_bool()):
+        pass
 
     usrp.set_tx_freq(lib.types.tune_request(target_center_freq), 0)
 
     # wait until the lo's are locked, or maybe just put some time delay here?
-    # while not (usrp.get_tx_sensor("lo_locked", 0).to_bool()):
-    #     pass
+    while not (usrp.get_tx_sensor("lo_locked", 0).to_bool()):
+        pass
 
 
 def set_txrx_gains(usrp, tx_gains, rx_gains):
@@ -65,15 +68,27 @@ def set_txrx_gains(usrp, tx_gains, rx_gains):
     usrp.set_rx_gain(rx_gains[1], 1)
 
 
-def tx_worker(usrp, tx_streamer, tx_stop_event, sww_rx_on_event):
+def tx_worker(
+    usrp,
+    tx_streamer,
+    tx_stop_event,
+    sww_start_event,
+    sww_rx_on_event,
+    sww_tx_ready_event,
+):
 
     # define state constant
     TX_ZEROS = 0
-    TX_SWW_SUBPULSE = 1
-    TX_STOP = 2
-    WAIT_FOR_RX_DONE = 3
+    TX_PREP = 1
+    WAITING_TX_LO = 2
+    SWW_TX_READY = 3
+    SWW_TX_SUBPULSE = 4
+    WAIT_FOR_SWW_RX_DONE = 5
+    TX_STOP = 6
+
     START_STATE = TX_ZEROS
 
+    # initialize the state machine
     # Make a transmit buffer
     num_channels = tx_streamer.get_num_channels()
     max_samps_per_packet = tx_streamer.get_max_num_samps()
@@ -85,21 +100,60 @@ def tx_worker(usrp, tx_streamer, tx_stop_event, sww_rx_on_event):
     )
     metadata.has_time_spec = True
 
+    # start the state machine
     current_state = START_STATE
     while True:
 
         if current_state == TX_ZEROS:
+            # actions:
             tx_streamer.send(transmit_buffer, metadata)
             metadata.has_time_spec = False
 
             # state transition
-            if sww_rx_on_event.is_set():
-                current_state = TX_SWW_SUBPULSE
+            if sww_start_event.is_set():
+                current_state = TX_PREP
 
             if tx_stop_event.is_set():
                 current_state = TX_STOP
 
-        elif current_state == TX_SWW_SUBPULSE:
+        elif current_state == TX_PREP:
+            # actions
+            tx_streamer.send(transmit_buffer, metadata)
+            metadata.has_time_spec = False
+
+            usrp.set_tx_gain(tx_gains[0], 0)  # set tx gains
+            usrp.set_tx_gain(tx_gains[1], 1)
+
+            usrp.set_tx_freq(
+                lib.types.tune_request(target_center_freq), 0
+            )  # tune center freqs
+
+            # transitions
+            current_state = WAITING_TX_LO
+
+        elif current_state == WAITING_TX_LO:
+            # actions
+            tx_streamer.send(transmit_buffer, metadata)
+            metadata.has_time_spec = False
+
+            # transitions
+            if usrp.get_tx_sensor(
+                "lo_locked", 0
+            ).to_bool():  # if the tx lo locked, go to next state
+                current_state = SWW_TX_READY
+
+        elif current_state == SWW_TX_READY:
+            # actions
+            tx_streamer.send(transmit_buffer, metadata)
+            metadata.has_time_spec = False
+
+            sww_tx_ready_event.set()
+
+            # transitions
+            if sww_rx_on_event.is_set():
+                current_state = SWW_TX_SUBPULSE
+
+        elif current_state == SWW_TX_SUBPULSE:
             send_samps = 0
             total_samps = sww_tx_subpulse.shape[1]
             metadata.has_time_spec = False
@@ -110,16 +164,16 @@ def tx_worker(usrp, tx_streamer, tx_stop_event, sww_rx_on_event):
                     sww_tx_subpulse[:, send_samps : (send_samps + real_samps)],
                     metadata,
                 )
-                if tx_stop_event.is_set():
-                    break
 
             # state transitions
-            current_state = WAIT_FOR_RX_DONE
-        
-        elif current_state == WAIT_FOR_RX_DONE:
+            current_state = WAIT_FOR_SWW_RX_DONE
+
+        elif current_state == WAIT_FOR_SWW_RX_DONE:
             # actions
             tx_streamer.send(transmit_buffer, metadata)
             metadata.has_time_spec = False
+
+            sww_tx_ready_event.clear()
 
             # state transitions
             if not sww_rx_on_event.is_set():
@@ -135,13 +189,26 @@ def tx_worker(usrp, tx_streamer, tx_stop_event, sww_rx_on_event):
             raise Exception(f"Unknown tx state: {current_state}")
 
 
-def rx_worker(usrp, rx_streamer, rx_stop_event, sww_rx_start_event, sww_rx_on_event):
+def rx_worker(
+    usrp,
+    rx_streamer,
+    rx_stop_event,
+    sww_start_event,
+    sww_rx_on_event,
+    sww_tx_ready_event,
+):
 
     # define state constants
     RX_ZEROS = 0
-    RX_SWW_SUBPULSE = 1
-    RX_STOP = 2
+    RX_PREP = 1
+    WAITING_RX_LO = 2
+    SWW_RX_READY = 3
+    SWW_RX_SUBPULSE = 4
+    RX_STOP = 5
+
     START_STATE = RX_ZEROS
+
+    # state machine prepares
     # make a receive buffer
     num_channels = rx_streamer.get_num_channels()
     max_samps_per_packet = rx_streamer.get_max_num_samps()
@@ -157,6 +224,7 @@ def rx_worker(usrp, rx_streamer, rx_stop_event, sww_rx_start_event, sww_rx_on_ev
     )
     rx_streamer.issue_stream_cmd(stream_cmd)
 
+    # start the state machines
     current_state = START_STATE
     while True:
 
@@ -165,13 +233,41 @@ def rx_worker(usrp, rx_streamer, rx_stop_event, sww_rx_start_event, sww_rx_on_ev
             rx_streamer.recv(recv_buffer, metadata)
 
             # state transitions
-            if sww_rx_start_event.is_set():
-                current_state = RX_SWW_SUBPULSE
+            if sww_start_event.is_set():
+                current_state = RX_PREP
 
             if rx_stop_event.is_set():
                 current_state = RX_STOP
 
-        elif current_state == RX_SWW_SUBPULSE:
+        elif current_state == RX_PREP:
+            # actions
+            rx_streamer.recv(recv_buffer, metadata)
+
+            usrp.set_rx_gain(rx_gains[0], 0)  # set rx gains
+            usrp.set_rx_gain(rx_gains[1], 1)
+
+            usrp.set_rx_freq(lib.types.tune_request(target_center_freq), 0)
+
+            # transitions
+            current_state = WAITING_RX_LO
+
+        elif current_state == WAITING_RX_LO:
+            # actions
+            rx_streamer.recv(recv_buffer, metadata)
+
+            # transitions
+            if usrp.get_rx_sensor("lo_locked", 0).to_bool():
+                current_state = SWW_RX_READY
+
+        elif current_state == SWW_RX_READY:
+            # actions
+            rx_streamer.recv(recv_buffer, metadata)
+
+            # transitions
+            if sww_tx_ready_event.is_set():
+                current_state = SWW_RX_SUBPULSE
+
+        elif current_state == SWW_RX_SUBPULSE:
             # actions
             recv_samps = 0
             total_samps = sww_rx_subpulse.shape[1]
@@ -249,12 +345,21 @@ def main():
     rx_stop_event = threading.Event()
     tx_stop_event = threading.Event()
 
-    sww_rx_start_event = threading.Event()
+    sww_start_event = threading.Event()
     sww_rx_on_event = threading.Event()
+    sww_tx_ready_event = threading.Event()
+
 
     rx_thread = threading.Thread(
         target=rx_worker,
-        args=(usrp, rx_streamer, rx_stop_event, sww_rx_start_event, sww_rx_on_event),
+        args=(
+            usrp,
+            rx_streamer,
+            rx_stop_event,
+            sww_start_event,
+            sww_rx_on_event,
+            sww_tx_ready_event,
+        ),
     )
     rx_thread.setName("rx_thread")
     threads.append(rx_thread)
@@ -262,20 +367,20 @@ def main():
 
     tx_thread = threading.Thread(
         target=tx_worker,
-        args=(usrp, tx_streamer, tx_stop_event, sww_rx_on_event),
+        args=(
+            usrp,
+            tx_streamer,
+            tx_stop_event,
+            sww_start_event,
+            sww_rx_on_event,
+            sww_tx_ready_event,
+        ),
     )
     tx_thread.setName("tx_thread")
     threads.append(tx_thread)
 
     # start the threads
     # set center freqs and gains
-
-    tx_gains = [75, 75]
-    rx_gains = [10, 10]
-    center_freq = 1e9
-
-    set_txrx_gains(usrp, tx_gains, rx_gains)
-    set_txrx_center_freq(usrp, center_freq)
 
     rx_thread.start()
     time.sleep(
@@ -285,8 +390,7 @@ def main():
     time.sleep(5 * INIT_DELAY)
 
     # start collect data
-    sww_rx_start_event.set()
-    
+    sww_start_event.set()
 
     time.sleep(duration)
 
