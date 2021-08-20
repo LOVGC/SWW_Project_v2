@@ -236,9 +236,14 @@ class Usrp_B210:
             np.array([(tx1, rx1), (tx2, rx2), (tx3, rx3)],dtype=object)
         """
         for sensing_plan in sensing_plan_nparray:
+            start = time.time()
+
             tx = sensing_plan[0]
             rx = sensing_plan[1]
             self.tx_rx_one_cycle(tx, rx)
+
+            end = time.time()
+            print(f"one subpulse takes = {end - start}")
 
             plt.plot(
                 
