@@ -7,7 +7,7 @@ from threading import Thread
 import time
 
 import requests
-
+import matplotlib.pyplot as plt
 
 class Usrp_B210:
 
@@ -71,12 +71,9 @@ class Usrp_B210:
         self.tx_streamer = self.usrp.get_tx_stream(st_args)  # create tx streamer
         self.rx_streamer = self.usrp.get_rx_stream(st_args)  # create rx streamer
 
-       
-
         # the delay in unit of seconds for turn on tx_streamer and rx_streamer
         self.RX_DELAY = 0.01
         self.TX_DELAY = 0.012
-
 
         # create events for better sync
         self.rx_on_event = threading.Event()
@@ -171,7 +168,7 @@ class Usrp_B210:
         # tell the device to stop transmitting
         tx_md.end_of_burst = True
         self.tx_streamer.send(np.zeros((2, 0), dtype=np.complex64), tx_md)
-        
+
         self.tx_finish_event.set()
 
     def rx_waveform(self, result, center_freq, rx_gains):
@@ -193,7 +190,6 @@ class Usrp_B210:
 
         rx_md = lib.types.rx_metadata()
 
-
         # prepare the streamer
         stream_cmd = lib.types.stream_cmd(lib.types.stream_mode.num_done)
         num_rx_samps = result.shape[1]
@@ -214,8 +210,6 @@ class Usrp_B210:
         # turn off the rx_streamer
         stream_cmd = lib.types.stream_cmd(lib.types.stream_mode.stop_cont)
         self.rx_streamer.issue_stream_cmd(stream_cmd)
-
-        
 
     def tx_rx_one_cycle(self, tx, rx):
 
@@ -246,6 +240,11 @@ class Usrp_B210:
             rx = sensing_plan[1]
             self.tx_rx_one_cycle(tx, rx)
 
+            plt.plot(
+                
+                np.real(rx.result[0, :]),
+            )
+            plt.show()
 
 
 class TX:

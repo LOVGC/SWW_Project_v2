@@ -9,7 +9,7 @@ from utils.signals import complex_sinusoid, generate_chirp
 from utils.Usrp_B210 import *
 from utils.save_load import *
 
-import matplotlib as plt
+import matplotlib.pyplot as plt
 
 
 ###################################################################
