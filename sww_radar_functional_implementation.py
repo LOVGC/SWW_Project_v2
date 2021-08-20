@@ -11,9 +11,10 @@ from utils.signals import complex_sinusoid, generate_chirp
 
 import matplotlib.pyplot as plt
 
+
 # define constants
 INIT_DELAY = 0.05  # 50mS initial delay before transmit
-TXRX_RATE = 3.5e6  # the ADC/DAC rate of the rx and tx
+TXRX_RATE = 2e6  # the ADC/DAC rate of the rx and tx
 
 ###############################################################################################
 # define device parameters
@@ -39,10 +40,33 @@ sww_rx_subpulse = np.zeros((2, num_rx_samps), dtype=np.complex64)
 
 tx_gains = [75, 75]
 rx_gains = [10, 10]
-target_center_freq = 2e9
+target_center_freq = [2e9]
 
 
 ##########################################################################################
+# useful data structure
+class SensingPlan:
+    def __init__(
+        self,
+        center_freq,
+        tx_baseband_signal,
+        tx_gains_list,
+        rx_baseband_signal,
+        rx_gains_list,
+    ):
+        self.center_freq = center_freq
+        self.tx_baseband_signal = tx_baseband_signal
+        self.tx_gains_list = tx_gains_list
+        self.rx_baseband_signal = rx_baseband_signal
+        self.rx_gains_list = rx_gains_list
+
+
+# create a test sensing_plan_list
+sensing_plan_list = []
+
+
+###########################################################################################
+
 
 def tx_worker(
     usrp,
@@ -95,13 +119,12 @@ def tx_worker(
         elif current_state == TX_PREP:
             # actions
             tx_streamer.send(transmit_buffer, metadata)
-            
 
             usrp.set_tx_gain(tx_gains[0], 0)  # set tx gains
             usrp.set_tx_gain(tx_gains[1], 1)
 
             usrp.set_tx_freq(
-                lib.types.tune_request(target_center_freq), 0
+                lib.types.tune_request(target_center_freq[0]), 0
             )  # tune center freqs
 
             # transitions
@@ -110,7 +133,7 @@ def tx_worker(
         elif current_state == WAITING_TX_LO:
             # actions
             tx_streamer.send(transmit_buffer, metadata)
-            
+
             # transitions
             if usrp.get_tx_sensor(
                 "lo_locked", 0
@@ -120,7 +143,6 @@ def tx_worker(
         elif current_state == SWW_TX_READY:
             # actions
             tx_streamer.send(transmit_buffer, metadata)
-            
 
             sww_tx_ready_event.set()
 
@@ -131,7 +153,7 @@ def tx_worker(
         elif current_state == SWW_TX_SUBPULSE:
             send_samps = 0
             total_samps = sww_tx_subpulse.shape[1]
-            
+
             while send_samps < total_samps:
                 real_samps = min(max_samps_per_packet, total_samps - send_samps)
                 send_samps += tx_streamer.send(
@@ -219,7 +241,7 @@ def rx_worker(
             usrp.set_rx_gain(rx_gains[0], 0)  # set rx gains
             usrp.set_rx_gain(rx_gains[1], 1)
 
-            usrp.set_rx_freq(lib.types.tune_request(target_center_freq), 0)
+            usrp.set_rx_freq(lib.types.tune_request(target_center_freq[0]), 0)
 
             # transitions
             current_state = WAITING_RX_LO
@@ -279,7 +301,7 @@ def rx_worker(
             raise Exception(f"Unknown rx state: {current_state}")
 
 
-def sww_scheduler():
+def sww_data_collecter(sensing_plan_list):
     pass
 
 
@@ -321,7 +343,6 @@ def main():
     sww_start_event = threading.Event()
     sww_rx_on_event = threading.Event()
     sww_tx_ready_event = threading.Event()
-
 
     rx_thread = threading.Thread(
         target=rx_worker,
@@ -374,7 +395,10 @@ def main():
     for thr in threads:
         thr.join()
 
-    plt.plot(np.real(sww_rx_subpulse[0, :]))
+    plt.plot(
+        np.arange(0, sww_rx_subpulse.shape[1]) * 1 / TXRX_RATE,
+        np.real(sww_rx_subpulse[0, :]),
+    )
     plt.show()
 
 
