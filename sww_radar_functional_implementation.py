@@ -40,7 +40,7 @@ sww_rx_subpulse = np.zeros((2, num_rx_samps), dtype=np.complex64)
 
 tx_gains = [75, 75]
 rx_gains = [10, 10]
-target_center_freq = [2e9]
+target_center_freq = 2e9
 
 
 ##########################################################################################
@@ -61,10 +61,6 @@ class SensingPlan:
         self.rx_gains_list = rx_gains_list
 
 
-# create a test sensing_plan_list
-sensing_plan_list = []
-
-
 ###########################################################################################
 
 
@@ -75,6 +71,7 @@ def tx_worker(
     sww_start_event,
     sww_rx_on_event,
     sww_tx_ready_event,
+    sww_tx_done_event,
 ):
 
     # define state constant
@@ -84,7 +81,8 @@ def tx_worker(
     SWW_TX_READY = 3
     SWW_TX_SUBPULSE = 4
     WAIT_FOR_SWW_RX_DONE = 5
-    TX_STOP = 6
+    SWW_TX_DONE = 6
+    TX_STOP = 7
 
     START_STATE = TX_ZEROS
 
@@ -124,7 +122,7 @@ def tx_worker(
             usrp.set_tx_gain(tx_gains[1], 1)
 
             usrp.set_tx_freq(
-                lib.types.tune_request(target_center_freq[0]), 0
+                lib.types.tune_request(target_center_freq), 0
             )  # tune center freqs
 
             # transitions
@@ -172,7 +170,17 @@ def tx_worker(
 
             # state transitions
             if not sww_rx_on_event.is_set():
-                current_state = TX_ZEROS
+                current_state = SWW_TX_DONE
+
+        elif current_state == SWW_TX_DONE:
+            # actions
+            sww_tx_done_event.set()
+            sww_start_event.clear()
+
+            tx_streamer.send(transmit_buffer, metadata)
+
+            # transition
+            current_state = TX_ZEROS
 
         elif current_state == TX_STOP:
             print("Stop TX")
@@ -191,6 +199,7 @@ def rx_worker(
     sww_start_event,
     sww_rx_on_event,
     sww_tx_ready_event,
+    sww_rx_done_event,
 ):
 
     # define state constants
@@ -199,7 +208,8 @@ def rx_worker(
     WAITING_RX_LO = 2
     SWW_RX_READY = 3
     SWW_RX_SUBPULSE = 4
-    RX_STOP = 5
+    SWW_RX_DONE = 5
+    RX_STOP = 6
 
     START_STATE = RX_ZEROS
 
@@ -241,7 +251,7 @@ def rx_worker(
             usrp.set_rx_gain(rx_gains[0], 0)  # set rx gains
             usrp.set_rx_gain(rx_gains[1], 1)
 
-            usrp.set_rx_freq(lib.types.tune_request(target_center_freq[0]), 0)
+            usrp.set_rx_freq(lib.types.tune_request(target_center_freq), 0)
 
             # transitions
             current_state = WAITING_RX_LO
@@ -284,10 +294,20 @@ def rx_worker(
                 else:
                     print(metadata)
 
-                if rx_stop_event.is_set():
+                if rx_stop_event.is_set():  # !!!!!!!!!!!!!!!!!!!!!do we need this?
                     break
 
+            # transitions
             sww_rx_on_event.clear()
+            current_state = SWW_RX_DONE
+
+        elif current_state == SWW_RX_DONE:
+            # actions
+            sww_start_event.clear()
+            sww_rx_done_event.set()
+            rx_streamer.recv(recv_buffer, metadata)
+
+            # transitions
             current_state = RX_ZEROS
 
         elif current_state == RX_STOP:
@@ -301,8 +321,105 @@ def rx_worker(
             raise Exception(f"Unknown rx state: {current_state}")
 
 
-def sww_data_collecter(sensing_plan_list):
-    pass
+def sww_data_collecter(usrp, tx_streamer, rx_streamer, sensing_plan_list):
+
+    global sww_tx_subpulse, sww_rx_subpulse, tx_gains, rx_gains, target_center_freq
+    # create threads and events
+    threads = []
+
+    sww_rx_on_event = threading.Event()
+    sww_tx_ready_event = threading.Event()
+
+    rx_stop_event = threading.Event()
+    tx_stop_event = threading.Event()
+
+    sww_start_event = threading.Event()
+    sww_rx_done_event = threading.Event()
+    sww_tx_done_event = threading.Event()
+
+    rx_thread = threading.Thread(
+        target=rx_worker,
+        args=(
+            usrp,
+            rx_streamer,
+            rx_stop_event,
+            sww_start_event,
+            sww_rx_on_event,
+            sww_tx_ready_event,
+            sww_rx_done_event,
+        ),
+    )
+    rx_thread.setName("rx_thread")
+    threads.append(rx_thread)
+    ##############################################################################
+
+    tx_thread = threading.Thread(
+        target=tx_worker,
+        args=(
+            usrp,
+            tx_streamer,
+            tx_stop_event,
+            sww_start_event,
+            sww_rx_on_event,
+            sww_tx_ready_event,
+            sww_tx_done_event,
+        ),
+    )
+    tx_thread.setName("tx_thread")
+    threads.append(tx_thread)
+
+    # start the threads
+    rx_thread.start()
+    time.sleep(
+        5 * INIT_DELAY
+    )  # wait for some time to make sure the tx_worker and rx_worker are working properly
+    tx_thread.start()
+    time.sleep(5 * INIT_DELAY)
+
+    ##########################################################
+    # after this line the tx_worker and rx_worker should all be in the START_STATE
+    total_time_start = time.time()
+    for sensing_plan in sensing_plan_list:
+        # reload the global buffer
+        sww_tx_subpulse = sensing_plan.tx_baseband_signal
+        sww_rx_subpulse = sensing_plan.rx_baseband_signal
+        tx_gains = sensing_plan.tx_gains_list
+        rx_gains = sensing_plan.rx_gains_list
+        target_center_freq = sensing_plan.center_freq
+        print(f"working on center freq = {target_center_freq}")
+        # reset the event
+        sww_rx_done_event.clear()
+        sww_tx_done_event.clear()
+
+        start = time.time()
+        # spawn the tx_worker and rx_worker
+        sww_start_event.set()
+
+        # wait for the tx_worker() and rx_worker() to complete their job
+        sww_tx_done_event.wait()
+        sww_rx_done_event.wait()
+
+        end = time.time()
+        print(f"takes time = {end - start}")
+
+        # plot some stuff
+        plt.plot(
+            np.arange(0, sww_rx_subpulse.shape[1])
+            * 1
+            / TXRX_RATE,
+            np.real(sww_rx_subpulse[0, :]),
+        )
+        plt.show()
+
+    # turn off device after done
+    total_time_end = time.time()
+    print(f"Total time = {total_time_end-total_time_start}")
+
+    print("Sending signal to stop TX and RX!")
+    rx_stop_event.set()
+    tx_stop_event.set()
+    for thr in threads:
+        thr.join()
 
 
 def main():
@@ -334,72 +451,33 @@ def main():
     st_args.channels = tx_channels
     tx_streamer = usrp.get_tx_stream(st_args)
 
-    # create threads
-    threads = []
+    # create a test sensing plan list
+    start_freq = 500e6
+    stop_freq = 3e9
+    freq_step = 100e6
+    center_freq_list = np.arange(start_freq, stop_freq, freq_step)
 
-    rx_stop_event = threading.Event()
-    tx_stop_event = threading.Event()
+    sensing_plan_list = []
+    for f in center_freq_list:
+        center_freq = f
+        tx_baseband_signal, _ = complex_sinusoid(TXRX_RATE)
+        tx_gains_list = [80, 80]
+        num_rx_samps = tx_baseband_signal.shape[1] * 25
+        rx_baseband_signal = np.zeros((2, num_rx_samps), dtype=np.complex64)
+        rx_gains_list = [10, 10]
 
-    sww_start_event = threading.Event()
-    sww_rx_on_event = threading.Event()
-    sww_tx_ready_event = threading.Event()
+        sensing_plan = SensingPlan(
+            center_freq,
+            tx_baseband_signal,
+            tx_gains_list,
+            rx_baseband_signal,
+            rx_gains_list,
+        )
 
-    rx_thread = threading.Thread(
-        target=rx_worker,
-        args=(
-            usrp,
-            rx_streamer,
-            rx_stop_event,
-            sww_start_event,
-            sww_rx_on_event,
-            sww_tx_ready_event,
-        ),
-    )
-    rx_thread.setName("rx_thread")
-    threads.append(rx_thread)
-    ##############################################################################
+        sensing_plan_list.append(sensing_plan)
 
-    tx_thread = threading.Thread(
-        target=tx_worker,
-        args=(
-            usrp,
-            tx_streamer,
-            tx_stop_event,
-            sww_start_event,
-            sww_rx_on_event,
-            sww_tx_ready_event,
-        ),
-    )
-    tx_thread.setName("tx_thread")
-    threads.append(tx_thread)
-
-    # start the threads
-    # set center freqs and gains
-
-    rx_thread.start()
-    time.sleep(
-        5 * INIT_DELAY
-    )  # wait for some time to make sure the tx_worker and rx_worker are working properly
-    tx_thread.start()
-    time.sleep(5 * INIT_DELAY)
-
-    # start collect data
-    sww_start_event.set()
-
-    time.sleep(duration)
-
-    # turn off device
-    print("Sending signal to stop TX and RX!")
-    rx_stop_event.set()
-    tx_stop_event.set()
-    for thr in threads:
-        thr.join()
-
-    plt.plot(
-        np.arange(0, sww_rx_subpulse.shape[1]) * 1 / TXRX_RATE,
-        np.real(sww_rx_subpulse[0, :]),
-    )
-    plt.show()
+    # call the collector
+    sww_data_collecter(usrp, tx_streamer, rx_streamer, sensing_plan_list)
 
 
 if __name__ == "__main__":
