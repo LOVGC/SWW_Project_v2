@@ -1,6 +1,7 @@
 # plot and data structure packages
 from os import removexattr
 from pickle import load
+from numpy.core.defchararray import center
 import scipy.io
 import numpy as np
 from utils.signals import complex_sinusoid, generate_chirp
@@ -29,9 +30,11 @@ rxB_gain = 10
 # radar parameters
 start_freq = 500e6
 stop_freq = 3e9
-freq_step = 10e6
+freq_step = 100e6
 
-center_freqs = np.arange(start_freq, stop_freq, freq_step)
+# center_freqs = np.arange(start_freq, stop_freq, freq_step)
+
+center_freqs = np.random.randint(start_freq, stop_freq, size=250)
 
 ####################################################################
 # generate the sensing plan nparray

@@ -398,8 +398,9 @@ def sww_data_collecter(usrp, tx_streamer, rx_streamer, sensing_plan_list):
         sww_start_event.set()
 
         # wait for the tx_worker() and rx_worker() to complete their job
-        sww_tx_done_event.wait()
+        
         sww_rx_done_event.wait()
+        sww_tx_done_event.wait()
 
         end = time.time()
         print(f"takes time = {end - start}")
@@ -460,11 +461,11 @@ def main():
     center_freq_list = np.arange(start_freq, stop_freq, freq_step)
 
     sensing_plan_list = []
-    for f in center_freq_list:
-        center_freq = f
+    for _ in center_freq_list:
+        center_freq = np.random.choice(center_freq_list)
         tx_baseband_signal, _ = complex_sinusoid(TXRX_RATE)
         tx_gains_list = [80, 80]
-        num_rx_samps = tx_baseband_signal.shape[1] * 10
+        num_rx_samps = tx_baseband_signal.shape[1] * 50
         rx_baseband_signal = np.zeros((2, num_rx_samps), dtype=np.complex64)
         rx_gains_list = [10, 10]
 
