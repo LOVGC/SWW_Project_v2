@@ -65,11 +65,14 @@ print(
 )
 
 
-for i in range(200):
-    print(f"{i} th iteration")
-    my_B210.sww_sensing(sensing_plan_nparray_sine_waves)
+# for i in range(200):
+#     print(f"{i} th iteration")
+#     my_B210.sww_sensing(sensing_plan_nparray_sine_waves)
 
-
+start = time.time()
+my_B210.sww_sensing(sensing_plan_nparray_sine_waves)
+end = time.time()
+print(f"total scan time = {end - start}")
 # save_sensing_plan_nparray('sensing_plan_sinewaves', sensing_plan_nparray_sine_waves)
 
 

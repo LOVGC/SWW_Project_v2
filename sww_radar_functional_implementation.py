@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 
 # define constants
 INIT_DELAY = 0.05  # 50mS initial delay before transmit
-TXRX_RATE = 2e6  # the ADC/DAC rate of the rx and tx
+TXRX_RATE = 1e6  # the ADC/DAC rate of the rx and tx
 
 ###############################################################################################
 # define device parameters
@@ -147,6 +147,7 @@ def tx_worker(
             # transitions
             if sww_rx_on_event.is_set():
                 current_state = SWW_TX_SUBPULSE
+                sww_rx_on_event.clear()
 
         elif current_state == SWW_TX_SUBPULSE:
             send_samps = 0
@@ -165,8 +166,6 @@ def tx_worker(
         elif current_state == WAIT_FOR_SWW_RX_DONE:
             # actions
             tx_streamer.send(transmit_buffer, metadata)
-
-            sww_tx_ready_event.clear()
 
             # state transitions
             if not sww_rx_on_event.is_set():
@@ -271,18 +270,21 @@ def rx_worker(
             # transitions
             if sww_tx_ready_event.is_set():
                 current_state = SWW_RX_SUBPULSE
+                sww_tx_ready_event.clear()
 
         elif current_state == SWW_RX_SUBPULSE:
             # actions
             recv_samps = 0
             total_samps = sww_rx_subpulse.shape[1]
+
+            sww_rx_on_event.set()  # set this event on after receiving the first package
             while recv_samps < total_samps:
                 samps = rx_streamer.recv(
                     recv_buffer,
                     metadata,
                 )
 
-                sww_rx_on_event.set()  # set this event on after receiving the first package
+                
 
                 # save the rx signal
                 if samps:
@@ -454,7 +456,7 @@ def main():
     # create a test sensing plan list
     start_freq = 500e6
     stop_freq = 3e9
-    freq_step = 100e6
+    freq_step = 10e6
     center_freq_list = np.arange(start_freq, stop_freq, freq_step)
 
     sensing_plan_list = []
@@ -462,7 +464,7 @@ def main():
         center_freq = f
         tx_baseband_signal, _ = complex_sinusoid(TXRX_RATE)
         tx_gains_list = [80, 80]
-        num_rx_samps = tx_baseband_signal.shape[1] * 25
+        num_rx_samps = tx_baseband_signal.shape[1] * 10
         rx_baseband_signal = np.zeros((2, num_rx_samps), dtype=np.complex64)
         rx_gains_list = [10, 10]
 
