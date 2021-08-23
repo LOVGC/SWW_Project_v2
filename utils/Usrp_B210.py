@@ -9,6 +9,7 @@ import time
 import requests
 import matplotlib.pyplot as plt
 
+
 class Usrp_B210:
 
     ###################################################################################################################
@@ -246,7 +247,7 @@ class Usrp_B210:
             print(f"one subpulse takes = {end - start}")
 
             plt.plot(
-                
+                np.arange(0, rx.result.shape[1]) * 1 / self.usrp.get_tx_rate(),
                 np.real(rx.result[0, :]),
             )
             plt.show()

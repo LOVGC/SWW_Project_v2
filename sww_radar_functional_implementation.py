@@ -155,12 +155,20 @@ def tx_worker(
 
             while send_samps < total_samps:
                 real_samps = min(max_samps_per_packet, total_samps - send_samps)
+
+                # is this important?
+                transmit_buffer = sww_tx_subpulse[:, send_samps : (send_samps + real_samps)]
+
                 send_samps += tx_streamer.send(
-                    sww_tx_subpulse[:, send_samps : (send_samps + real_samps)],
+                    transmit_buffer,
                     metadata,
                 )
 
+            # clear the transmit_buffer
+            transmit_buffer = np.zeros((num_channels, max_samps_per_packet), dtype=np.complex64)
+
             # state transitions
+            
             current_state = WAIT_FOR_SWW_RX_DONE
 
         elif current_state == WAIT_FOR_SWW_RX_DONE:
@@ -388,7 +396,7 @@ def sww_data_collecter(usrp, tx_streamer, rx_streamer, sensing_plan_list):
         tx_gains = sensing_plan.tx_gains_list
         rx_gains = sensing_plan.rx_gains_list
         target_center_freq = sensing_plan.center_freq
-        print(f"working on center freq = {target_center_freq}")
+        print(f"working on center freq = {target_center_freq/1e9} GHz")
         # reset the event
         sww_rx_done_event.clear()
         sww_tx_done_event.clear()
@@ -458,11 +466,11 @@ def main():
     start_freq = 500e6
     stop_freq = 3e9
     freq_step = 10e6
-    center_freq_list = np.arange(start_freq, stop_freq, freq_step)
+    center_freq_list = np.random.randint(start_freq, stop_freq, size=250)
 
     sensing_plan_list = []
-    for _ in center_freq_list:
-        center_freq = np.random.choice(center_freq_list)
+    for f in center_freq_list:
+        center_freq = f
         tx_baseband_signal, _ = complex_sinusoid(TXRX_RATE)
         tx_gains_list = [80, 80]
         num_rx_samps = tx_baseband_signal.shape[1] * 50

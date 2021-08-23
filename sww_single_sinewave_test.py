@@ -15,8 +15,8 @@ import matplotlib.pyplot as plt
 
 ###################################################################
 # device parameters and radar parameters
-samp_rate_ADC_DAC = 10e6
-master_clock_rate = 20e6 # clock rate should be larger, less than 10MHz will cause problem
+samp_rate_ADC_DAC = 1e6
+master_clock_rate = 16e6 # clock rate should be larger, less than 10MHz will cause problem
 my_B210 = Usrp_B210(samp_rate_ADC_DAC, master_clock_rate)
 
 
@@ -30,7 +30,7 @@ rxB_gain = 10
 # radar parameters
 start_freq = 500e6
 stop_freq = 3e9
-freq_step = 100e6
+freq_step = 10e6
 
 # center_freqs = np.arange(start_freq, stop_freq, freq_step)
 
@@ -51,7 +51,7 @@ for f in center_freqs:
 
     tx = TX(baseband_waveform, center_freq, tx_gains)
     # prepare the RX() object
-    num_rx_samps = baseband_waveform.shape[1] * 10
+    num_rx_samps = baseband_waveform.shape[1] * 50
     # num_rx_samps = length_wave_one_period*20
     result = np.zeros((2, num_rx_samps), dtype=np.complex64)
     rx = RX(result, center_freq, rx_gains)
