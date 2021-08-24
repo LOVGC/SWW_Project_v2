@@ -105,7 +105,7 @@ def tx_worker(
         if current_state == TX_ZEROS:
             # actions:
             tx_streamer.send(transmit_buffer, metadata)
-            metadata.has_time_spec = False
+            metadata.has_time_spec = False   # set False to send immediately
 
             # state transition
             if sww_start_event.is_set():
