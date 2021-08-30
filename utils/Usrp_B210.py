@@ -46,6 +46,10 @@ class Usrp_B210:
         # this set the master clock rate
         self.usrp.set_master_clock_rate(master_clock_rate)
 
+
+        # we need to synchronize the channels by running the following
+        self.usrp.set_time_unknown_pps(uhd.types.TimeSpec(0.0))
+        
         # select subdevices: the RF frontend tx chains and rx chains
         subdevice = "A:A A:B"  # select subdevice in the daughterboard, we are using two channels
         subdevice_spec = lib.usrp.subdev_spec(subdevice)
