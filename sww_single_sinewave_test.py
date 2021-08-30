@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 ###################################################################
 # device parameters and radar parameters
 samp_rate_ADC_DAC = 1e6
-master_clock_rate = 16e6 # clock rate should be larger, less than 10MHz will cause problem
+master_clock_rate = None # clock rate should be larger, less than 10MHz will cause problem
 my_B210 = Usrp_B210(samp_rate_ADC_DAC, master_clock_rate)
 
 

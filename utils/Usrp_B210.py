@@ -19,7 +19,7 @@ class Usrp_B210:
     #################################################################################################################
     # Initialization for SWW Radar implemented with USRP B210
     ################################################################################################################
-    def __init__(self, samp_rate_ADC_DAC, master_clock_rate=30e6):
+    def __init__(self, samp_rate_ADC_DAC, master_clock_rate):
         """This function implements the common settings shared by all the subpulses. The common settings are
             Maximum BW for all Baseband subpulses
 
@@ -44,12 +44,14 @@ class Usrp_B210:
         # this sets the source of the frequency reference, typically a 10 MHz signal
         self.usrp.set_clock_source(freq_clock_source)
         # this set the master clock rate
-        self.usrp.set_master_clock_rate(master_clock_rate)
+        
+        if master_clock_rate:
+            self.usrp.set_master_clock_rate(master_clock_rate)
 
 
         # we need to synchronize the channels by running the following
         self.usrp.set_time_unknown_pps(uhd.types.TimeSpec(0.0))
-        
+
         # select subdevices: the RF frontend tx chains and rx chains
         subdevice = "A:A A:B"  # select subdevice in the daughterboard, we are using two channels
         subdevice_spec = lib.usrp.subdev_spec(subdevice)
