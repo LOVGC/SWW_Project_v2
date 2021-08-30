@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 
 ###################################################################
 # device parameters and radar parameters
-samp_rate_ADC_DAC = 1e6
+samp_rate_ADC_DAC = 5e6
 master_clock_rate = None # clock rate should be larger, less than 10MHz will cause problem
 my_B210 = Usrp_B210(samp_rate_ADC_DAC, master_clock_rate)
 
@@ -34,7 +34,7 @@ freq_step = 10e6
 
 # center_freqs = np.arange(start_freq, stop_freq, freq_step)
 
-center_freqs = np.random.randint(start_freq, stop_freq, size=250)
+center_freqs = np.random.randint(start_freq, stop_freq, size=50)
 
 ####################################################################
 # generate the sensing plan nparray
@@ -60,6 +60,8 @@ for f in center_freqs:
 
 sensing_plan_nparray_sine_waves = np.array(sensing_plan_list, dtype=object)
 
+print(f"shape is {sensing_plan_nparray_sine_waves.shape}")
+
 # turn on the AGC?? not sure whether this is a good idea
 
 print(
@@ -76,6 +78,8 @@ start = time.time()
 my_B210.sww_sensing(sensing_plan_nparray_sine_waves)
 end = time.time()
 print(f"total scan time = {end - start}")
-# save_sensing_plan_nparray('sensing_plan_sinewaves', sensing_plan_nparray_sine_waves)
+
+# save data
+my_B210.save_sww_data("loopback_test")
 
 

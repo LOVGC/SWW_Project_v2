@@ -6,7 +6,7 @@ import numpy as np
 from threading import Thread
 import time
 
-import requests
+import scipy.io
 import matplotlib.pyplot as plt
 
 
@@ -242,6 +242,8 @@ class Usrp_B210:
             sensing_plan_nparray ([type] numpy object array): created like this:
             np.array([(tx1, rx1), (tx2, rx2), (tx3, rx3)],dtype=object)
         """
+        self.sensing_plan_nparray = sensing_plan_nparray
+
         for sensing_plan in sensing_plan_nparray:
             start = time.time()
 
@@ -252,12 +254,35 @@ class Usrp_B210:
             end = time.time()
             print(f"one subpulse takes = {end - start}")
 
-            plt.plot(
-                np.arange(0, rx.result.shape[1]) * 1 / self.usrp.get_tx_rate(),
-                np.real(rx.result[0, :]),
-            )
-            plt.show()
+            # plt.plot(
+            #     np.arange(0, rx.result.shape[1]) * 1 / self.usrp.get_tx_rate(),
+            #     np.real(rx.result[0, :]),
+            # )
+            # plt.show()
+    
+    def save_sww_data(self, file_name):
 
+        row_num = self.sensing_plan_nparray.shape[0] # row_num is the number of subpulses
+        col_num = self.sensing_plan_nparray[0, 1].result.shape[1] # number of data points in each subpulse
+
+        # each row represents a subpulse
+        rxA = np.zeros((row_num, col_num), dtype=np.complex64)
+        rxB = np.zeros((row_num, col_num), dtype=np.complex64)
+
+        for sensing_plan, i in zip(self.sensing_plan_nparray, range(row_num)):
+            rxA[i] = sensing_plan[1].result[0, :]
+            rxB[i] = sensing_plan[1].result[1, :]
+        
+        # save into matlab data
+        print("saving data ...")
+        file_path = f"/home/banana/Desktop/B210_SWW/data/matlab_data/{file_name}.mat"
+        with open(file_path, "wb") as f:  # need 'wb' in Python3
+            scipy.io.savemat(f, {"rxA": rxA})
+            scipy.io.savemat(f, {"rxB": rxB})
+            scipy.io.savemat(f, {"samp_rate": self.usrp.get_rx_rate(0)})
+        
+        print(f"Data is saved to {file_path}")
+            
 
 class TX:
     def __init__(self, baseband_waveform, center_freq, tx_gains):
